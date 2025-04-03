@@ -1,11 +1,19 @@
 [package]
 name = "alloy-ephemeral-lens"
 version = "0.1.0"
+authors = ["maxgiraud"]
 edition = "2024"
+license = "MIT"
+readme = "./README.md"
+repository = "https://github.com/maxgiraud/alloy-ephemeral-lens"
+homepage = "https://github.com/maxgiraud/alloy-ephemeral-lens"
+description = """
+Ephemeral lens call helper for simulation and data retrieving
+"""
 
 [dependencies]
 alloy = { version = "0.13.0", features = ["full"] }
-hex = "0.4.3"
-thiserror = "2.0.12"
+
+[dev-dependencies]
 tokio = { version = "1.44.1", features = ["full"] }
 tokio-test = "0.4.4"
