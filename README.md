@@ -54,3 +54,9 @@ async fn main() {
     println!("{:?}", result);
 }
 ```
+
+## Credits
+
+- [alloy]
+
+[alloy]: https://github.com/alloy-rs
