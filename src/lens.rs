@@ -1,42 +1,12 @@
+
 use alloy::{
-    dyn_abi::{DynSolType, DynSolValue, FunctionExt, SolType},
-    network::Network, primitives::{Address, Bytes, U256},
+    dyn_abi::{FunctionExt, SolType},
+    network::Network, primitives::{Address, Bytes},
     providers::Provider, rpc::types::state::{AccountOverride, StateOverride},
-    sol_types::{JsonAbiExt, Revert, SolCall, SolError}
+    sol_types::{JsonAbiExt, SolCall}
 };
 
-use crate::contract::IProxy::{self, IProxyInstance};
-
-
-/// Represents a contract call with encoding and decoding functionalities
-struct Call {
-    /// Function pointer for decoding response data
-    decoder: fn(&[u8]) -> Vec<DynSolValue>,
-    /// Address of the contract being called
-    address: Address,
-    /// Encoded function arguments
-    argument: Bytes,
-    /// Ether value sent with the call
-    value: U256,
-    /// Gas limit for the call
-    gas: U256,
-}
-
-impl Call {
-
-    fn encode(&self) -> IProxy::CallArgument {
-        IProxy::CallArgument {
-            callee: self.address,
-            argument: self.argument.clone(),
-            value: self.value,
-            gas: self.gas,
-        }
-    }
-        
-    fn decode(&self, data: &[u8]) -> Vec<DynSolValue> {
-        (self.decoder)(data)
-    }
-}
+use crate::{call::Call, contract::IProxy::{self, IProxyInstance}, CallResult};
 
 /// A struct that acts as a lens to interact with a smart contract proxy
 pub struct Lens<P, N>
@@ -131,13 +101,11 @@ where
     {
         let call = T::new(args);
         self.calls.push(
-            Call {
-                decoder: |data| T::abi().abi_decode_output(data, true).unwrap(),
-                address: *address,
-                argument: call.abi_encode().into(),
-                value: U256::from(0),
-                gas: U256::from(1000000000u32),
-            }
+            Call::new(
+                |data| T::abi().abi_decode_output(data, true).unwrap(),
+                *address,
+                call.abi_encode().into()
+            )
         );
 
         self
@@ -155,50 +123,5 @@ where
             .zip(result._0.iter())
             .map(|(c, elt)| CallResult::from(c, elt))
             .collect()
-    }
-}
-
-/// Represents the result of a contract call
-#[derive(Debug)]
-pub struct CallResult {
-    /// Indicates if the call was successful
-    pub success: bool,
-    /// Gas consumed by the call
-    pub gas_used: U256,
-    /// Decoded return data
-    pub result: Vec<DynSolValue>,
-    /// Error details if the call reverted
-    pub revert: Option<Revert>,
-}
-
-impl CallResult {
-    /// Constructs a CallResult instance from raw response data
-    fn from(call: &Call, data: &Bytes) -> Self {
-        let binding = DynSolType::Bytes.abi_decode(&data[4..]).unwrap();
-        let result_data = binding.as_bytes().unwrap();
-
-        let binding = DynSolType::Tuple(
-            vec![DynSolType::Bool, DynSolType::Uint(256), DynSolType::Bytes]
-        ).abi_decode_params(result_data)
-        .unwrap();
-
-        let result_data = binding.as_tuple().unwrap();
-
-        let success = result_data[0].as_bool().unwrap();
-        let gas_used = result_data[1].as_uint().unwrap().0.into();
-
-        let result = if success {
-            call.decode(result_data[2].as_bytes().unwrap())
-        } else {
-            vec![]
-        };
-
-        let revert = if success {
-            None
-        } else {
-            Some(Revert::abi_decode(result_data[2].as_bytes().unwrap(), true).unwrap())
-        };
-
-        Self { success, gas_used, result, revert }
     }
 }

@@ -1,4 +1,8 @@
 mod contract;
-mod middleware;
+mod call_result;
+mod lens;
+mod call;
 
-pub use middleware::{Lens,CallResult};
+pub use lens::Lens;
+pub use call::Call;
+pub use call_result::CallResult;
