@@ -1,6 +1,6 @@
 [package]
 name = "alloy-ephemeral-lens"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["maxgiraud"]
 edition = "2024"
 license = "MIT"
@@ -12,7 +12,7 @@ Ephemeral lens call helper for simulation and data retrieving
 """
 
 [dependencies]
-alloy = { version = "0.13.0", features = ["full"] }
+alloy = { version = "1.7.3", features = ["full"] }
 
 [dev-dependencies]
 tokio = { version = "1.44.1", features = ["full"] }

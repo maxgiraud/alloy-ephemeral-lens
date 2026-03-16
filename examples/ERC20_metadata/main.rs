@@ -24,7 +24,7 @@ async fn main() {
 
     let rpc_url = env::var("RPC_URL").unwrap();
     let ws = WsConnect::new(rpc_url);
-    let provider = ProviderBuilder::new().on_ws(ws).await.unwrap();
+    let provider = ProviderBuilder::new().connect_ws(ws).await.unwrap();
 
     let lens_address = Address::repeat_byte(0xca);
 

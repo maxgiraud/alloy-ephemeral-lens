@@ -15,7 +15,7 @@ where
     P: Provider<N>
 {
     /// Proxy contract instance
-    proxy: IProxyInstance<(), P, N>,
+    proxy: IProxyInstance<P, N>,
     /// Collection of contract calls
     calls: Vec<Call>,
     /// State overrides for ephemeral execution
@@ -35,7 +35,7 @@ where
     /// # use alloy_ephemeral_lens::Lens;
     /// # use alloy::providers::ProviderBuilder;
     /// # tokio_test::block_on(async {
-    /// let provider = ProviderBuilder::new().on_builtin("http://localhost:8080").await.unwrap();
+    /// let provider = ProviderBuilder::new().connect("http://localhost:8080").await.unwrap();
     /// let lens = Lens::new(&provider);
     /// # })
     /// ```
@@ -82,7 +82,7 @@ where
     /// }
     /// #
     /// # tokio_test::block_on(async {
-    /// # let provider = ProviderBuilder::new().on_builtin("http://localhost:8080").await.unwrap();
+    /// # let provider = ProviderBuilder::new().connect("http://localhost:8080").await.unwrap();
     /// # let address = Address::repeat_byte(0x01);
     /// # let mut lens = Lens::new(&provider);
     /// 
@@ -102,7 +102,7 @@ where
         let call = T::new(args);
         self.calls.push(
             Call::new(
-                |data| T::abi().abi_decode_output(data, true).unwrap(),
+                |data| T::abi().abi_decode_output(data).unwrap(),
                 *address,
                 call.abi_encode().into()
             )
@@ -118,9 +118,9 @@ where
             .collect();
 
         let result = self.proxy.execute(calls).state(self.state_overrides.clone()).call().await.unwrap();
-        
+
         self.calls.iter()
-            .zip(result._0.iter())
+            .zip(result.iter())
             .map(|(c, elt)| CallResult::from(c, elt))
             .collect()
     }

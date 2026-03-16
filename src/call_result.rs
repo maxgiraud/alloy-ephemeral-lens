@@ -43,7 +43,7 @@ impl CallResult {
         let revert = if success {
             None
         } else {
-            Some(Revert::abi_decode(result_data[2].as_bytes().unwrap(), true).unwrap())
+            Revert::abi_decode(result_data[2].as_bytes().unwrap()).ok()
         };
 
         Self { success, gas_used, result, revert }
