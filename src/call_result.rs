@@ -14,6 +14,9 @@ pub struct CallResult {
     pub gas_used: U256,
     /// Decoded return data
     pub result: Vec<DynSolValue>,
+    /// Raw return bytes, before any typed decoding. Lets callers decode results
+    /// the typed `decoder` does not cover (e.g. raw calls).
+    pub raw: Bytes,
     /// Error details if the call reverted
     pub revert: Option<Revert>,
 }
@@ -32,10 +35,11 @@ impl CallResult {
         let result_data = binding.as_tuple().unwrap();
 
         let success = result_data[0].as_bool().unwrap();
-        let gas_used = result_data[1].as_uint().unwrap().0.into();
+        let gas_used = result_data[1].as_uint().unwrap().0;
+        let raw_bytes = result_data[2].as_bytes().unwrap();
 
         let result = if success {
-            call.decode(result_data[2].as_bytes().unwrap())
+            call.decode(raw_bytes)
         } else {
             vec![]
         };
@@ -43,9 +47,9 @@ impl CallResult {
         let revert = if success {
             None
         } else {
-            Revert::abi_decode(result_data[2].as_bytes().unwrap()).ok()
+            Revert::abi_decode(raw_bytes).ok()
         };
 
-        Self { success, gas_used, result, revert }
+        Self { success, gas_used, result, raw: Bytes::copy_from_slice(raw_bytes), revert }
     }
 }

@@ -1,7 +1,7 @@
 use std::env;
 
 use alloy::{
-    primitives::{address, Address, U256},
+    primitives::{address, Address, Bytes, U256},
     providers::{ProviderBuilder, WsConnect},
     sol,
 };
@@ -66,7 +66,7 @@ async fn test_batch_direct_erc20_calls() {
         .with_call::<IERC20::symbolCall>(&USDC, ())
         .with_call::<IERC20::decimalsCall>(&USDC, ());
 
-    let results = lens.call().await;
+    let results = lens.call().await.unwrap();
 
     assert_eq!(results.len(), 6);
     assert!(results.iter().all(|r| r.success), "all calls should succeed");
@@ -93,7 +93,7 @@ async fn test_ephemeral_aggregator_lens() {
         .with_call::<ITokenLens::getTokenCall>(&lens_addr, (USDC,))
         .with_call::<ITokenLens::getTokenCall>(&lens_addr, (DAI,));
 
-    let results = lens.call().await;
+    let results = lens.call().await.unwrap();
 
     assert_eq!(results.len(), 3);
     assert!(results.iter().all(|r| r.success));
@@ -125,7 +125,7 @@ async fn test_revert_does_not_abort_batch() {
         .with_call::<IRevertLens::testFailCall>(&lens_addr, ())
         .with_call::<IERC20::symbolCall>(&USDC, ());
 
-    let results = lens.call().await;
+    let results = lens.call().await.unwrap();
 
     assert_eq!(results.len(), 3);
 
@@ -138,6 +138,36 @@ async fn test_revert_does_not_abort_batch() {
 
     assert!(results[2].success);
     assert_eq!(results[2].result[0].as_str().unwrap(), "USDC");
+}
+
+/// A per-call gas cap bounds one item without starving its siblings: a call
+/// given too little gas to read WETH's `name()` fails, while the calls around it
+/// (uncapped) still succeed. `name()` reads storage, so 100 gas is guaranteed to
+/// be insufficient.
+#[tokio::test]
+async fn test_per_call_gas_cap_isolates_one_item() {
+    let provider = require_provider!();
+
+    // `name()` selector.
+    let name_calldata = Bytes::from_static(&[0x06, 0xfd, 0xde, 0x03]);
+
+    let mut lens = Lens::new(&provider);
+    lens.with_raw_call(&WETH, name_calldata.clone())
+        .with_raw_call_gas(&WETH, name_calldata.clone(), U256::from(100u64))
+        .with_raw_call(&WETH, name_calldata);
+
+    let results = lens.call().await.unwrap();
+
+    assert_eq!(results.len(), 3);
+    assert!(results[0].success, "uncapped call should succeed");
+    assert!(
+        !results[1].success,
+        "100-gas call should run out of gas reading name()"
+    );
+    assert!(
+        results[2].success,
+        "the capped sibling must not starve the following call"
+    );
 }
 
 /// Each call's gas is measured independently. A lens call that makes three
@@ -154,7 +184,7 @@ async fn test_gas_measured_per_call() {
         // Complex: three external sub-calls (name + symbol + decimals)
         .with_call::<ITokenLens::getTokenCall>(&lens_addr, (WETH,));
 
-    let results = lens.call().await;
+    let results = lens.call().await.unwrap();
 
     assert_eq!(results.len(), 2);
     assert!(results.iter().all(|r| r.success));

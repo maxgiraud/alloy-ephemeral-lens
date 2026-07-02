@@ -32,7 +32,8 @@ impl Call {
         self
     }
 
-    /// TODO: unused
+    /// Sets a per-call gas limit, forwarded by the proxy as
+    /// `callee.call{gas: gas}(...)`. A value of zero forwards all remaining gas.
     pub fn with_gas(&mut self, gas: U256) -> &mut Self {
         self.gas = gas;
         self

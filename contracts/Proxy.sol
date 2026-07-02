@@ -30,7 +30,11 @@ contract Proxy {
     ) public {
         uint256 gasStart = gasleft();
 
-        (bool success, bytes memory data) = _call.callee.call(_call.argument);
+        // A zero `gas` means "forward all remaining gas" (the historical
+        // behaviour); a non-zero value caps this item so one gas-heavy call
+        // cannot starve its siblings in the same batch.
+        uint256 gasLimit = _call.gas == 0 ? gasleft() : _call.gas;
+        (bool success, bytes memory data) = _call.callee.call{gas: gasLimit}(_call.argument);
         revert(
             string(
                 abi.encode(
