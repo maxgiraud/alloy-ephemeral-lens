@@ -1,9 +1,12 @@
 use std::env;
 
 use alloy::{
+    eips::BlockId,
     primitives::{address, Address, Bytes, U256},
-    providers::{ProviderBuilder, WsConnect},
+    providers::{Provider, ProviderBuilder, WsConnect},
+    rpc::types::TransactionRequest,
     sol,
+    sol_types::SolCall,
 };
 use alloy_ephemeral_lens::Lens;
 
@@ -16,6 +19,8 @@ sol! {
         function symbol() external view returns (string memory);
         #[sol(abi)]
         function decimals() external view returns (uint8);
+        #[sol(abi)]
+        function totalSupply() external view returns (uint256);
     }
 }
 
@@ -197,4 +202,30 @@ async fn test_gas_measured_per_call() {
         complex_gas > simple_gas,
         "aggregated call ({complex_gas} gas) should use more than a single storage read ({simple_gas} gas)"
     );
+}
+
+/// `with_block` pins the batch to a historical block: the lens must read the
+/// same WETH totalSupply as a plain eth_call pinned at that block, and not the
+/// (long since changed) value at latest. Needs an archive node.
+#[tokio::test]
+async fn test_with_block_reads_historical_state() {
+    let provider = require_provider!();
+    let block = BlockId::number(20_000_000);
+
+    let calldata = IERC20::totalSupplyCall {}.abi_encode();
+    let tx = TransactionRequest::default().to(WETH).input(calldata.into());
+    let raw = provider.call(tx).block(block).await.unwrap();
+    let expected = IERC20::totalSupplyCall::abi_decode_returns(&raw).unwrap();
+
+    let mut pinned = Lens::new(&provider);
+    pinned.with_call::<IERC20::totalSupplyCall>(&WETH, ()).with_block(block);
+    let pinned = pinned.call().await.unwrap();
+
+    let mut latest = Lens::new(&provider);
+    latest.with_call::<IERC20::totalSupplyCall>(&WETH, ());
+    let latest = latest.call().await.unwrap();
+
+    let pinned_supply = pinned[0].result[0].as_uint().unwrap().0;
+    assert_eq!(pinned_supply, expected);
+    assert_ne!(pinned_supply, latest[0].result[0].as_uint().unwrap().0);
 }

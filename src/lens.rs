@@ -1,6 +1,7 @@
 
 use alloy::{
     dyn_abi::{FunctionExt, SolType},
+    eips::BlockId,
     network::Network, primitives::{Address, Bytes, B256, U256},
     providers::Provider, rpc::types::state::{AccountOverride, StateOverride},
     sol_types::{JsonAbiExt, SolCall}
@@ -23,6 +24,9 @@ where
     /// `from` address for the eth_call (sets `tx.origin`); `None` uses the
     /// provider default.
     caller: Option<Address>,
+    /// Block the eth_call executes against; `None` uses the provider default
+    /// (`latest`).
+    block: Option<BlockId>,
 }
 
 impl<P, N> Lens<P, N>
@@ -55,6 +59,7 @@ where
             calls: vec![],
             state_overrides: state_override,
             caller: None,
+            block: None,
         }
     }
 
@@ -63,6 +68,15 @@ where
     /// arbitrage executor's owner check).
     pub fn with_caller(&mut self, from: Address) -> &mut Self {
         self.caller = Some(from);
+        self
+    }
+
+    /// Pins the underlying eth_call to `block`, so every call reads that block's
+    /// state (requires an archive node for old blocks). State overrides still
+    /// apply on top of it. The ephemeral proxy uses post-Cancun opcodes, so a
+    /// block before Cancun (mainnet 19,426,587) fails with `NotActivated`.
+    pub fn with_block(&mut self, block: BlockId) -> &mut Self {
+        self.block = Some(block);
         self
     }
 
@@ -207,6 +221,9 @@ where
         let mut builder = self.proxy.execute(calls).state(self.state_overrides.clone());
         if let Some(from) = self.caller {
             builder = builder.from(from);
+        }
+        if let Some(block) = self.block {
+            builder = builder.block(block);
         }
         let result = builder.call().await?;
 
