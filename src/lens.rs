@@ -3,7 +3,7 @@ use alloy::{
     dyn_abi::{FunctionExt, SolType},
     eips::BlockId,
     network::Network, primitives::{Address, Bytes, B256, U256},
-    providers::Provider, rpc::types::state::{AccountOverride, StateOverride},
+    providers::Provider, rpc::types::{state::{AccountOverride, StateOverride}, BlockOverrides},
     sol_types::{JsonAbiExt, SolCall}
 };
 
@@ -27,6 +27,9 @@ where
     /// Block the eth_call executes against; `None` uses the provider default
     /// (`latest`).
     block: Option<BlockId>,
+    /// Block environment the eth_call executes under (number, timestamp, …);
+    /// `None` keeps the environment of `block`.
+    block_overrides: Option<BlockOverrides>,
 }
 
 impl<P, N> Lens<P, N>
@@ -60,6 +63,7 @@ where
             state_overrides: state_override,
             caller: None,
             block: None,
+            block_overrides: None,
         }
     }
 
@@ -77,6 +81,16 @@ where
     /// block before Cancun (mainnet 19,426,587) fails with `NotActivated`.
     pub fn with_block(&mut self, block: BlockId) -> &mut Self {
         self.block = Some(block);
+        self
+    }
+
+    /// Runs the eth_call under a different block environment: the state stays
+    /// that of [`Self::with_block`] (or `latest`), while `block.number`,
+    /// `block.timestamp` and the other fields set in `overrides` read as given.
+    /// Lets a view that depends on the environment, such as a fee that decays
+    /// with time, be evaluated as the next block will see it.
+    pub fn with_block_overrides(&mut self, overrides: BlockOverrides) -> &mut Self {
+        self.block_overrides = Some(overrides);
         self
     }
 
@@ -225,7 +239,11 @@ where
         if let Some(block) = self.block {
             builder = builder.block(block);
         }
-        let result = builder.call().await?;
+        let mut call = builder.call();
+        if let Some(overrides) = &self.block_overrides {
+            call = call.with_block_overrides(overrides.clone());
+        }
+        let result = call.await?;
 
         Ok(self.calls.iter()
             .zip(result.iter())

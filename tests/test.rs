@@ -4,7 +4,7 @@ use alloy::{
     eips::BlockId,
     primitives::{address, Address, Bytes, U256},
     providers::{Provider, ProviderBuilder, WsConnect},
-    rpc::types::TransactionRequest,
+    rpc::types::{BlockOverrides, TransactionRequest},
     sol,
     sol_types::SolCall,
 };
@@ -43,6 +43,17 @@ sol! {
     }
 }
 
+// Multicall3 exposes the block environment as views.
+sol! {
+    interface IMulticall3 {
+        #[sol(abi)]
+        function getBlockNumber() external view returns (uint256);
+        #[sol(abi)]
+        function getCurrentBlockTimestamp() external view returns (uint256);
+    }
+}
+
+const MULTICALL3: Address = address!("cA11bde05977b3631167028862bE2a173976CA11");
 const WETH: Address = address!("C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2");
 const USDC: Address = address!("A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48");
 const DAI:  Address = address!("6B175474E89094C44Da98b954EedeAC495271d0F");
@@ -228,4 +239,23 @@ async fn test_with_block_reads_historical_state() {
     let pinned_supply = pinned[0].result[0].as_uint().unwrap().0;
     assert_eq!(pinned_supply, expected);
     assert_ne!(pinned_supply, latest[0].result[0].as_uint().unwrap().0);
+}
+
+/// `with_block_overrides` changes the environment, not the state: pinned to a
+/// block, the calls must see the overridden number and timestamp.
+#[tokio::test]
+async fn test_with_block_overrides_sets_the_environment() {
+    let provider = require_provider!();
+    let mut lens = Lens::new(&provider);
+    lens.with_call::<IMulticall3::getBlockNumberCall>(&MULTICALL3, ())
+        .with_call::<IMulticall3::getCurrentBlockTimestampCall>(&MULTICALL3, ())
+        .with_block(BlockId::number(20_000_000))
+        .with_block_overrides(BlockOverrides {
+            number: Some(U256::from(20_000_001u64)),
+            time: Some(1_717_281_419),
+            ..Default::default()
+        });
+    let results = lens.call().await.unwrap();
+    assert_eq!(results[0].result[0].as_uint().unwrap().0, U256::from(20_000_001u64));
+    assert_eq!(results[1].result[0].as_uint().unwrap().0, U256::from(1_717_281_419u64));
 }
