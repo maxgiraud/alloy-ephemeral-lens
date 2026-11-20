@@ -50,6 +50,8 @@ sol! {
         function getBlockNumber() external view returns (uint256);
         #[sol(abi)]
         function getCurrentBlockTimestamp() external view returns (uint256);
+        #[sol(abi)]
+        function getBasefee() external view returns (uint256);
     }
 }
 
@@ -258,4 +260,71 @@ async fn test_with_block_overrides_sets_the_environment() {
     let results = lens.call().await.unwrap();
     assert_eq!(results[0].result[0].as_uint().unwrap().0, U256::from(20_000_001u64));
     assert_eq!(results[1].result[0].as_uint().unwrap().0, U256::from(1_717_281_419u64));
+}
+
+/// Runtime code returning `tx.gasprice`: GASPRICE PUSH0 MSTORE PUSH1 0x20 PUSH0 RETURN.
+const GASPRICE_CODE: [u8; 7] = [0x3a, 0x5f, 0x52, 0x60, 0x20, 0x5f, 0xf3];
+
+/// Without fees the calls see `tx.gasprice == 0`; with `with_fees` they see
+/// `basefee + priority`, as a real transaction would.
+#[tokio::test]
+async fn test_with_fees_sets_the_gas_price() {
+    let provider = require_provider!();
+    let block = BlockId::number(20_000_000);
+    let caller = address!("00000000000000000000000000000000000c0ffe");
+    let probe = address!("00000000000000000000000000000000000ba5e0");
+    let gas_price = |fees: Option<(u128, u128)>| {
+        let provider = &provider;
+        async move {
+            let mut lens = Lens::new(provider);
+            lens.with_ephemeral(&probe, Bytes::from_static(&GASPRICE_CODE))
+                .with_raw_call(&probe, Bytes::new())
+                .with_call::<IMulticall3::getBasefeeCall>(&MULTICALL3, ())
+                .with_caller(caller)
+                .with_balance(&caller, U256::from(10u128.pow(30)))
+                .with_block(block);
+            if let Some((max_fee, priority)) = fees {
+                lens.with_fees(max_fee, priority);
+            }
+            let r = lens.call().await.unwrap();
+            let basefee = r[1].result[0].as_uint().unwrap().0;
+            (U256::from_be_slice(&r[0].raw), basefee)
+        }
+    };
+    let (price, _) = gas_price(None).await;
+    assert_eq!(price, U256::ZERO);
+    let (price, basefee) = gas_price(Some((10_000_000_000_000, 3))).await;
+    assert_eq!(price, basefee + U256::from(3u64));
+}
+
+/// With fees and no gas limit reth runs the call at the block gas limit; an
+/// explicit limit restores the RPC gas cap. A sub-call offered 80M gas (above
+/// mainnet's 60M block limit, below a 500M RPC cap) burns what it gets: it
+/// loops while more than 30,000 gas are left,
+/// JUMPDEST GAS PUSH2 0x7530 LT PUSH0 JUMPI STOP.
+#[tokio::test]
+async fn test_with_gas_limit_lifts_the_block_gas_limit() {
+    let provider = require_provider!();
+    let caller = address!("00000000000000000000000000000000000c0ffe");
+    let burner = address!("00000000000000000000000000000000000b0b0b");
+    const BURN: [u8; 9] = [0x5b, 0x5a, 0x61, 0x75, 0x30, 0x10, 0x5f, 0x57, 0x00];
+    let run = |gas: Option<u64>| {
+        let provider = &provider;
+        async move {
+            let mut lens = Lens::new(provider);
+            lens.with_ephemeral(&burner, Bytes::from_static(&BURN))
+                .with_raw_call_gas(&burner, Bytes::new(), U256::from(80_000_000u64))
+                .with_caller(caller)
+                .with_balance(&caller, U256::from(10u128.pow(30)))
+                .with_fees(10_000_000_000_000, 1);
+            if let Some(gas) = gas {
+                lens.with_gas_limit(gas);
+            }
+            lens.call().await
+        }
+    };
+    let capped = run(None).await.unwrap();
+    assert!(capped[0].gas_used < U256::from(60_000_000u64));
+    let lifted = run(Some(1_000_000_000)).await.unwrap();
+    assert!(lifted[0].gas_used > U256::from(70_000_000u64));
 }

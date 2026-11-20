@@ -30,6 +30,11 @@ where
     /// Block environment the eth_call executes under (number, timestamp, …);
     /// `None` keeps the environment of `block`.
     block_overrides: Option<BlockOverrides>,
+    /// `(max_fee_per_gas, max_priority_fee_per_gas)` of the eth_call; `None`
+    /// sends no fee fields, so the calls see `tx.gasprice == 0`.
+    fees: Option<(u128, u128)>,
+    /// Gas limit of the eth_call; `None` leaves it to the node.
+    gas_limit: Option<u64>,
 }
 
 impl<P, N> Lens<P, N>
@@ -64,6 +69,8 @@ where
             caller: None,
             block: None,
             block_overrides: None,
+            fees: None,
+            gas_limit: None,
         }
     }
 
@@ -91,6 +98,31 @@ where
     /// with time, be evaluated as the next block will see it.
     pub fn with_block_overrides(&mut self, overrides: BlockOverrides) -> &mut Self {
         self.block_overrides = Some(overrides);
+        self
+    }
+
+    /// Sends the eth_call with EIP-1559 fee fields, so the calls see
+    /// `tx.gasprice = min(max_fee_per_gas, basefee + max_priority_fee_per_gas)`
+    /// instead of 0. Contracts can read `GASPRICE` to tell a simulation from a
+    /// real transaction; this makes the lens look like one.
+    ///
+    /// The node checks the caller can pay `gas × max_fee_per_gas` (and may
+    /// lower the gas limit to what it can afford), and rejects a
+    /// `max_fee_per_gas` below the block's basefee. Fund the caller with
+    /// [`Self::with_balance`] and keep `max_fee_per_gas` above any basefee.
+    ///
+    /// Without [`Self::with_gas_limit`], a node may then run the call at the
+    /// block gas limit rather than its RPC gas cap (reth does), which a large
+    /// batch can exceed.
+    pub fn with_fees(&mut self, max_fee_per_gas: u128, max_priority_fee_per_gas: u128) -> &mut Self {
+        self.fees = Some((max_fee_per_gas, max_priority_fee_per_gas));
+        self
+    }
+
+    /// Sets the eth_call's gas limit. A node clamps it to its RPC gas cap, so
+    /// a value above the cap asks for the whole cap.
+    pub fn with_gas_limit(&mut self, gas: u64) -> &mut Self {
+        self.gas_limit = Some(gas);
         self
     }
 
@@ -238,6 +270,12 @@ where
         }
         if let Some(block) = self.block {
             builder = builder.block(block);
+        }
+        if let Some((max_fee, priority)) = self.fees {
+            builder = builder.max_fee_per_gas(max_fee).max_priority_fee_per_gas(priority);
+        }
+        if let Some(gas) = self.gas_limit {
+            builder = builder.gas(gas);
         }
         let mut call = builder.call();
         if let Some(overrides) = &self.block_overrides {
